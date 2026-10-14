@@ -1,3 +1,4 @@
+
 from pathlib import Path
 from datetime import datetime
 
@@ -79,8 +80,9 @@ def load_dataset():
 
 
 def is_spam_label(label):
-    value = str(label).strip().lower()
-    return value in {"spam", "junk", "phishing", "true"}
+    return str(label).strip().lower() in {
+        "spam", "1", "true", "junk", "phishing"
+    }
 
 
 def predict_message(message):
@@ -92,14 +94,16 @@ def predict_message(message):
     if hasattr(model, "predict_proba"):
         probabilities = model.predict_proba(features)[0]
         classes = list(model.classes_)
-        index = classes.index(prediction)
-        confidence = float(probabilities[index]) * 100
+        confidence = float(
+            probabilities[classes.index(prediction)]
+        ) * 100
 
     return spam, confidence
 
 
 def record_scan(message, spam, confidence):
     st.session_state.total_scans += 1
+
     if spam:
         st.session_state.spam_count += 1
 
@@ -108,15 +112,19 @@ def record_scan(message, spam, confidence):
         "Message": message,
         "Prediction": "Spam" if spam else "Not Spam",
         "Confidence": (
-            f"{confidence:.1f}%" if confidence is not None else "N/A"
+            f"{confidence:.1f}%"
+            if confidence is not None else "N/A"
         ),
     })
+
     st.session_state.history = st.session_state.history[:50]
 
 
 def analyze_and_record(message):
     spam, confidence = predict_message(message)
+
     record_scan(message, spam, confidence)
+
     st.session_state.last_result = {
         "message": message,
         "spam": spam,
@@ -141,11 +149,103 @@ def show_result(result):
         """, unsafe_allow_html=True)
 
     if result["confidence"] is not None:
-        st.metric("Model Confidence", f'{result["confidence"]:.1f}%')
-        st.caption("Estimated probability from the trained model.")
+        st.metric(
+            "Model Confidence",
+            f'{result["confidence"]:.1f}%'
+        )
+        st.caption(
+            "Estimated probability from the trained model, "
+            "not a guarantee of correctness."
+        )
 
-    with st.expander("View analyzed message"):
+    with st.expander("View analyzed message", expanded=False):
+        st.markdown("**Input Message**")
         st.write(result["message"])
+
+        features = vectorizer.transform([result["message"]])
+
+        st.divider()
+        st.subheader("🔬 Analysis Process")
+
+        st.markdown("**Step 1 — Text Vectorization**")
+        st.write(
+            "TF-IDF converts the message into numerical features "
+            "using the vocabulary learned during training."
+        )
+
+        feature_names = vectorizer.get_feature_names_out()
+        values = features.toarray()[0]
+        nonzero_indices = values.nonzero()[0]
+
+        if len(nonzero_indices):
+            feature_df = pd.DataFrame({
+                "Word": feature_names[nonzero_indices],
+                "TF-IDF Score": values[nonzero_indices],
+            }).sort_values(
+                "TF-IDF Score", ascending=False
+            )
+
+            st.caption("Words with the highest TF-IDF scores")
+            st.dataframe(
+                feature_df.head(10).reset_index(drop=True),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info(
+                "No words from the model's learned vocabulary "
+                "were found in this message."
+            )
+
+        st.divider()
+        st.markdown("**Step 2 — Model Evaluation**")
+        st.write(
+            "The trained Multinomial Naive Bayes model evaluates "
+            "the numerical features and predicts a class."
+        )
+
+        st.divider()
+        st.markdown("**Step 3 — Class Probabilities**")
+
+        if hasattr(model, "predict_proba"):
+            probabilities = model.predict_proba(features)[0]
+            classes = list(model.classes_)
+
+            probability_df = pd.DataFrame({
+                "Class": [
+                    "Spam" if is_spam_label(label)
+                    else "Not Spam"
+                    for label in classes
+                ],
+                "Probability (%)": [
+                    round(float(probability) * 100, 2)
+                    for probability in probabilities
+                ],
+            })
+
+            st.dataframe(
+                probability_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            chart_df = probability_df.set_index("Class")
+            st.bar_chart(chart_df)
+        else:
+            st.info(
+                "This model does not provide class probabilities."
+            )
+
+        st.divider()
+        st.markdown("**Step 4 — Final Prediction**")
+
+        prediction = "Spam" if result["spam"] else "Not Spam"
+        st.write(f"Predicted class: **{prediction}**")
+
+        st.caption(
+            "TF-IDF scores describe feature values, not the "
+            "individual causal contribution of each word."
+        )
 
 
 if "history" not in st.session_state:
@@ -173,6 +273,7 @@ except Exception as error:
     model = None
     vectorizer = None
 
+
 with st.sidebar:
     st.markdown("# 🛡️ AI Spam Classifier")
     st.caption("SMS & Email Protection")
@@ -180,7 +281,12 @@ with st.sidebar:
 
     page = st.radio(
         "NAVIGATION",
-        ["Message Scanner", "Batch Analysis", "Dataset Info", "About"],
+        [
+            "Message Scanner",
+            "Batch Analysis",
+            "Dataset Info",
+            "About",
+        ],
     )
 
     st.divider()
@@ -193,8 +299,11 @@ with st.sidebar:
 
     st.caption("Python · Scikit-learn · Streamlit")
 
+
 st.title("🛡️ AI Spam Classifier")
-st.caption("Analyze SMS and email messages using machine learning.")
+st.caption(
+    "Analyze SMS and email messages using machine learning."
+)
 
 if not model_ready:
     st.error("The trained model could not be loaded.")
@@ -221,19 +330,28 @@ if page == "Message Scanner":
             ),
         }
 
-        example_clicked = None
         col1, col2, col3 = st.columns(3)
+        example_clicked = None
 
         with col1:
-            if st.button("🎁 Prize Message", use_container_width=True):
+            if st.button(
+                "🎁 Prize Message",
+                use_container_width=True,
+            ):
                 example_clicked = examples["Prize Message"]
 
         with col2:
-            if st.button("💬 Normal Message", use_container_width=True):
+            if st.button(
+                "💬 Normal Message",
+                use_container_width=True,
+            ):
                 example_clicked = examples["Normal Message"]
 
         with col3:
-            if st.button("⚠️ Account Warning", use_container_width=True):
+            if st.button(
+                "⚠️ Account Warning",
+                use_container_width=True,
+            ):
                 example_clicked = examples["Account Warning"]
 
         if example_clicked is not None:
@@ -256,7 +374,9 @@ if page == "Message Scanner":
 
         if example_clicked is not None or analyze_clicked:
             text_to_analyze = (
-                example_clicked if example_clicked is not None else message
+                example_clicked
+                if example_clicked is not None
+                else message
             )
 
             if not text_to_analyze.strip():
@@ -299,14 +419,17 @@ if page == "Message Scanner":
         else:
             st.info("Your scan history will appear here.")
 
-        st.caption("Statistics are maintained for the current session.")
+        st.caption("Statistics cover the current session.")
 
 
 elif page == "Batch Analysis":
     st.subheader("Batch Analysis")
     st.write("Upload a CSV containing a column named `text`.")
 
-    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+    uploaded_file = st.file_uploader(
+        "Upload CSV",
+        type=["csv"],
+    )
 
     if uploaded_file is not None:
         try:
@@ -321,29 +444,43 @@ elif page == "Batch Analysis":
             elif len(batch_df) > 10000:
                 st.error("Upload a maximum of 10,000 messages at a time.")
             else:
-                st.write("Preview")
-                st.dataframe(batch_df.head(10), use_container_width=True)
+                st.write("File Preview")
+                st.dataframe(
+                    batch_df.head(10),
+                    use_container_width=True,
+                )
 
-                if st.button("Analyze CSV", use_container_width=True):
+                if st.button(
+                    "Analyze CSV",
+                    use_container_width=True,
+                ):
                     texts = batch_df["text"].astype(str).tolist()
                     features = vectorizer.transform(texts)
                     predictions = model.predict(features)
 
                     results = batch_df.copy()
                     results["Prediction"] = [
-                        "Spam" if is_spam_label(item) else "Not Spam"
-                        for item in predictions
+                        "Spam" if is_spam_label(label)
+                        else "Not Spam"
+                        for label in predictions
                     ]
 
                     if hasattr(model, "predict_proba"):
                         probabilities = model.predict_proba(features)
                         classes = list(model.classes_)
-                        indices = [
-                            classes.index(item) for item in predictions
+                        predicted_indices = [
+                            classes.index(label)
+                            for label in predictions
                         ]
+
                         results["Confidence (%)"] = [
-                            round(float(probabilities[i][j]) * 100, 2)
-                            for i, j in enumerate(indices)
+                            round(
+                                float(probabilities[i][class_index]) * 100,
+                                2,
+                            )
+                            for i, class_index in enumerate(
+                                predicted_indices
+                            )
                         ]
 
                     spam_count = int(
@@ -353,13 +490,21 @@ elif page == "Batch Analysis":
                     col1, col2, col3 = st.columns(3)
                     col1.metric("Total Messages", len(results))
                     col2.metric("Spam", spam_count)
-                    col3.metric("Not Spam", len(results) - spam_count)
+                    col3.metric(
+                        "Not Spam",
+                        len(results) - spam_count,
+                    )
 
-                    st.dataframe(results, use_container_width=True)
+                    st.dataframe(
+                        results,
+                        use_container_width=True,
+                    )
 
                     st.download_button(
-                        "Download Results",
-                        data=results.to_csv(index=False).encode("utf-8"),
+                        "⬇️ Download Results",
+                        data=results.to_csv(
+                            index=False
+                        ).encode("utf-8"),
                         file_name="spam_analysis_results.csv",
                         mime="text/csv",
                     )
@@ -379,7 +524,13 @@ elif page == "Dataset Info":
         elif not {"label", "text"}.issubset(dataset.columns):
             st.warning("Expected columns: label and text.")
         else:
-            labels = dataset["label"].astype(str).str.strip().str.lower()
+            labels = (
+                dataset["label"]
+                .astype(str)
+                .str.strip()
+                .str.lower()
+            )
+
             spam_mask = labels.isin(
                 ["spam", "1", "true", "junk", "phishing"]
             )
@@ -387,13 +538,21 @@ elif page == "Dataset Info":
             col1, col2, col3 = st.columns(3)
             col1.metric("Total Messages", len(dataset))
             col2.metric("Spam Messages", int(spam_mask.sum()))
-            col3.metric("Other Messages", int((~spam_mask).sum()))
+            col3.metric(
+                "Other Messages",
+                int((~spam_mask).sum()),
+            )
 
             st.subheader("Label Distribution")
-            st.bar_chart(dataset["label"].astype(str).value_counts())
+            st.bar_chart(
+                dataset["label"].astype(str).value_counts()
+            )
 
             st.subheader("Dataset Preview")
-            st.dataframe(dataset.head(20), use_container_width=True)
+            st.dataframe(
+                dataset.head(20),
+                use_container_width=True,
+            )
 
     except Exception as error:
         st.error(f"Could not read the dataset: {error}")
@@ -409,20 +568,22 @@ elif page == "About":
     st.subheader("About This Project")
 
     st.write(
-        "This application classifies SMS and email messages as spam "
-        "or not spam using a trained machine learning model."
+        "This application classifies SMS and email messages as "
+        "spam or not spam using a trained machine learning model."
     )
 
     st.markdown("### How It Works")
     st.markdown("""
     1. The user enters a message.
-    2. TF-IDF converts the text into numerical features.
+    2. TF-IDF converts text into numerical features.
     3. Multinomial Naive Bayes predicts the message category.
     4. The application displays the prediction and confidence.
     """)
 
     st.markdown("### Technologies")
-    st.write("Python, Pandas, Scikit-learn, Joblib and Streamlit.")
+    st.write(
+        "Python, Pandas, Scikit-learn, Joblib and Streamlit."
+    )
 
     st.markdown("### Limitations")
     st.write(
@@ -431,4 +592,6 @@ elif page == "About":
     )
 
 st.divider()
-st.caption("AI Spam Classifier · Python · Scikit-learn · Streamlit")
+st.caption(
+    "AI Spam Classifier · Python · Scikit-learn · Streamlit"
+)
