@@ -270,12 +270,18 @@ if page == "Message Scanner":
             ["Choose an example"] + list(examples.keys()),
         )
 
-        if st.button("Load Example"):
-            if example_choice in examples:
-                st.session_state.single_message = examples[
-                    example_choice
-                ]
-                st.rerun()
+       
+if st.button("Load Example"):
+    if example_choice in examples:
+        st.session_state["pending_example"] = examples[
+            example_choice
+        ]
+        st.rerun()
+
+if "pending_example" in st.session_state:
+    st.session_state["single_message"] = (
+        st.session_state.pop("pending_example")
+    )
 
         if st.button("🔍 Analyze Message", use_container_width=True):
             if not message.strip():
